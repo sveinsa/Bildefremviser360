@@ -22,21 +22,24 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <!-- EXIF.js for å hente GPS-data fra bildet -->
+  <!-- EXIF.js for å hente GPS-data fra JPG/PNG -->
   <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
+
+  <!-- Three.js og EXRLoader for EXR-støtte -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/EXRLoader.js"></script>
 
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body, html {
       font-family: 'Inter', system-ui, -apple-system, sans-serif;
-      background-color: #d8e2d2; /* Asplan Viak lys grønn */
+      background-color: #d8e2d2;
       color: #1a1d1e;
       width: 100%;
       height: 100%;
-      overflow: hidden; /* Hindrer scrollbars */
+      overflow: hidden;
     }
 
-    /* --- Opplastingsvisning (Skjerm 1) --- */
     #upload-screen {
       display: flex;
       flex-direction: column;
@@ -128,7 +131,6 @@
     }
     .btn:hover { background: #f8fbf5; border-color: #82a760; color: #1a1d1e; }
 
-    /* --- 360 Visning (Skjerm 2) --- */
     #panorama-wrapper {
       display: none;
       position: absolute;
@@ -139,7 +141,7 @@
       z-index: 10;
       background: #000;
     }
-    #panorama { width: 100%; height: 100%; }
+    #panorama, #exr-canvas-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
 
     .close-btn {
       position: absolute;
@@ -150,7 +152,6 @@
       backdrop-filter: blur(4px);
     }
 
-    /* --- Kartvisning --- */
     #map {
       display: none;
       position: absolute;
@@ -179,7 +180,6 @@
 </head>
 <body>
 
-  <!-- Skjerm 1: Opplastingsområdet -->
   <div id="upload-screen">
     <div class="top-header">
       <p>360-foto</p>
@@ -195,17 +195,17 @@
             <line x1="12" y1="3" x2="12" y2="15"></line>
           </svg>
         </div>
-        <h2>Dra og slipp et 360-bilde her</h2>
+        <h2>Dra og slipp et 360-bilde her (JPG, PNG eller EXR)</h2>
         <button class="btn" style="pointer-events: none;">Velg fil fra disk</button>
-        <input type="file" id="fileInput" accept="image/jpeg, image/png" style="display: none;" onchange="handleFile(this.files[0])" />
+        <input type="file" id="fileInput" accept="image/jpeg, image/png, .exr" style="display: none;" onchange="handleFile(this.files[0])" />
       </div>
     </div>
   </div>
 
-  <!-- Skjerm 2: 360-visning -->
   <div id="panorama-wrapper">
     <button class="btn close-btn" onclick="resetViewer()">Lukk bilde</button>
     <div id="panorama"></div>
+    <div id="exr-canvas-container"></div>
     <div id="map"></div>
   </div>
 
@@ -218,62 +218,62 @@
     let initialDirection = 0;
     let currentImgUrl = null;
 
-    // --- Drag & Drop Håndtering ---
-    dropZone.addEventListener('dragover', (e) => { 
-      e.preventDefault(); 
-      dropZone.classList.add('dragover');
-    });
-    dropZone.addEventListener('dragleave', () => { 
-      dropZone.classList.remove('dragover');
-    });
+    // Three.js variabler for EXR
+    let threeRenderer, threeScene, threeCamera, threeMesh;
+    let isThreeActive = false;
+    let isUserInteracting = false, onPointerDownPointerX = 0, onPointerDownPointerY = 0;
+    let lon = 0, onPointerDownLon = 0, lat = 0, onPointerDownLat = 0, phi = 0, theta = 0;
+
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('dragover'); });
     dropZone.addEventListener('drop', (e) => {
       e.preventDefault();
       dropZone.classList.remove('dragover');
       if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
     });
 
-    // --- Fil Håndtering og EXIF-uthenting ---
     function handleFile(file) {
-      if (!file || !file.type.startsWith('image/')) return;
+      if (!file) return;
+      const fileName = file.name.toLowerCase();
       
       if (currentImgUrl) URL.revokeObjectURL(currentImgUrl);
       currentImgUrl = URL.createObjectURL(file);
       
       document.getElementById('upload-screen').style.display = 'none';
       document.getElementById('panorama-wrapper').style.display = 'block';
-      
-      initViewer(currentImgUrl);
 
-      EXIF.getData(file, function() {
-        const lat = EXIF.getTag(this, "GPSLatitude");
-        const lng = EXIF.getTag(this, "GPSLongitude");
-        
-        if (lat && lng) {
-           let latDeg = getNum(lat[0]) + getNum(lat[1])/60 + getNum(lat[2])/3600;
-           let lngDeg = getNum(lng[0]) + getNum(lng[1])/60 + getNum(lng[2])/3600;
-           
-           if (EXIF.getTag(this, "GPSLatitudeRef") === 'S') latDeg = -latDeg;
-           if (EXIF.getTag(this, "GPSLongitudeRef") === 'W') lngDeg = -lngDeg;
-           
-           let imgDir = EXIF.getTag(this, "GPSImgDirection");
-           if (imgDir) {
-               imgDir = getNum(imgDir);
-           } else {
-               imgDir = 0;
-           }
+      if (fileName.endsWith('.exr')) {
+        document.getElementById('panorama').style.display = 'none';
+        document.getElementById('exr-canvas-container').style.display = 'block';
+        initEXRViewer(file);
+      } else {
+        document.getElementById('exr-canvas-container').style.display = 'none';
+        document.getElementById('panorama').style.display = 'block';
+        initViewer(currentImgUrl);
 
-           initMap(latDeg, lngDeg, imgDir);
-        }
-      });
+        EXIF.getData(file, function() {
+          const latVal = EXIF.getTag(this, "GPSLatitude");
+          const lngVal = EXIF.getTag(this, "GPSLongitude");
+          
+          if (latVal && lngVal) {
+             let latDeg = getNum(latVal[0]) + getNum(latVal[1])/60 + getNum(latVal[2])/3600;
+             let lngDeg = getNum(lngVal[0]) + getNum(lngVal[1])/60 + getNum(lngVal[2])/3600;
+             if (EXIF.getTag(this, "GPSLatitudeRef") === 'S') latDeg = -latDeg;
+             if (EXIF.getTag(this, "GPSLongitudeRef") === 'W') lngDeg = -lngDeg;
+             let imgDir = getNum(EXIF.getTag(this, "GPSImgDirection") || 0);
+
+             initMap(latDeg, lngDeg, imgDir);
+          }
+        });
+      }
     }
 
     function getNum(val) {
-        if (!val) return 0;
-        if (val.numerator !== undefined) return val.numerator / val.denominator;
-        return parseFloat(val);
+      if (!val) return 0;
+      if (val.numerator !== undefined) return val.numerator / val.denominator;
+      return parseFloat(val);
     }
 
-    // --- Pannellum 360 Viewer ---
     function initViewer(url) {
       if (viewer) viewer.destroy();
       viewer = pannellum.viewer('panorama', {
@@ -284,25 +284,95 @@
         mouseZoom: true,
         compass: false 
       });
-      
       cancelAnimationFrame(syncRAF);
       syncLoop();
     }
 
-    // --- Kartvisning og Synkronisering ---
+    // --- Three.js EXR Renderer ---
+    function initEXRViewer(file) {
+      const container = document.getElementById('exr-canvas-container');
+      container.innerHTML = '';
+      isThreeActive = true;
+
+      threeScene = new THREE.Scene();
+      threeCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1100);
+
+      const geometry = new THREE.SphereGeometry(500, 60, 40);
+      geometry.scale(-1, 1, 1);
+
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const loader = new THREE.EXRLoader();
+        const texData = loader.parse(e.target.result);
+        const texture = new THREE.DataTexture(texData.data, texData.width, texData.height, texData.format, texData.type);
+        texture.needsUpdate = true;
+
+        const material = new THREE.MeshBasicMaterial({ map: texture });
+        threeMesh = new THREE.Mesh(geometry, material);
+        threeScene.add(threeMesh);
+      };
+      reader.readAsArrayBuffer(file);
+
+      threeRenderer = new THREE.WebGLRenderer({ antialias: true });
+      threeRenderer.setPixelRatio(window.devicePixelRatio);
+      threeRenderer.setSize(window.innerWidth, window.innerHeight);
+      container.appendChild(threeRenderer.domElement);
+
+      container.addEventListener('pointerdown', onPointerDown);
+      window.addEventListener('resize', onWindowResize);
+
+      animateThree();
+    }
+
+    function onPointerDown(e) {
+      isUserInteracting = true;
+      onPointerDownPointerX = e.clientX;
+      onPointerDownPointerY = e.clientY;
+      onPointerDownLon = lon;
+      onPointerDownLat = lat;
+      document.addEventListener('pointermove', onPointerMove);
+      document.addEventListener('pointerup', onPointerUp);
+    }
+
+    function onPointerMove(e) {
+      if (!isUserInteracting) return;
+      lon = (onPointerDownPointerX - e.clientX) * 0.1 + onPointerDownLon;
+      lat = (e.clientY - onPointerDownPointerY) * 0.1 + onPointerDownLat;
+    }
+
+    function onPointerUp() {
+      isUserInteracting = false;
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerup', onPointerUp);
+    }
+
+    function onWindowResize() {
+      if (!isThreeActive) return;
+      threeCamera.aspect = window.innerWidth / window.innerHeight;
+      threeCamera.updateProjectionMatrix();
+      threeRenderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animateThree() {
+      if (!isThreeActive) return;
+      requestAnimationFrame(animateThree);
+      lat = Math.max(-85, Math.min(85, lat));
+      phi = THREE.MathUtils.degToRad(90 - lat);
+      theta = THREE.MathUtils.degToRad(lon);
+
+      threeCamera.position.x = 100 * Math.sin(phi) * Math.cos(theta);
+      threeCamera.position.y = 100 * Math.cos(phi);
+      threeCamera.position.z = 100 * Math.sin(phi) * Math.sin(theta);
+      threeCamera.lookAt(threeScene.position);
+      threeRenderer.render(threeScene, threeCamera);
+    }
+
     function initMap(lat, lng, imgDir) {
       initialDirection = imgDir || 0;
       document.getElementById('map').style.display = 'block';
-      
       if (map) map.remove();
       
-      map = L.map('map', {
-        zoomControl: true, 
-        attributionControl: false, 
-        dragging: true, 
-        scrollWheelZoom: true
-      }).setView([lat, lng], 15);
-      
+      map = L.map('map', { zoomControl: true, attributionControl: false, dragging: true, scrollWheelZoom: true }).setView([lat, lng], 15);
       L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
 
       const iconHtml = `
@@ -314,19 +384,12 @@
                 <stop offset="100%" stop-color="#82a760" stop-opacity="0.85" />
               </linearGradient>
             </defs>
-            <!-- Blinkende retnings-kjegle -->
             <path class="blinking-beam" d="M30 30 L10 5 A 30 30 0 0 1 50 5 Z" fill="url(#beamGrad)" />
-            <!-- Hovedpil (Kompassnål) -->
             <path d="M30 15 L40 38 L30 33 L20 38 Z" fill="#1a1d1e" stroke="#ffffff" stroke-width="2.5" style="filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.4));" />
           </svg>
         </div>`;
       
-      const customIcon = L.divIcon({
-          html: iconHtml,
-          className: '',
-          iconSize: [60, 60],
-          iconAnchor: [30, 30]
-      });
+      const customIcon = L.divIcon({ html: iconHtml, className: '', iconSize: [60, 60], iconAnchor: [30, 30] });
       marker = L.marker([lat, lng], {icon: customIcon}).addTo(map);
     }
 
@@ -340,15 +403,12 @@
       syncRAF = requestAnimationFrame(syncLoop);
     }
 
-    // --- Tilbakestill ---
     function resetViewer() {
-      if (viewer) {
-        viewer.destroy();
-        viewer = null;
-      }
-      if (map) {
-        map.remove();
-        map = null;
+      if (viewer) { viewer.destroy(); viewer = null; }
+      if (map) { map.remove(); map = null; }
+      if (isThreeActive) {
+        isThreeActive = false;
+        if (threeRenderer) threeRenderer.dispose();
       }
       cancelAnimationFrame(syncRAF);
       
