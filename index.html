@@ -140,7 +140,6 @@
     }
     #panorama { width: 100%; height: 100%; }
 
-    /* Visual drop overlay når man drar filer over visningsskjermen */
     #viewer-drop-overlay {
       display: none;
       position: absolute;
@@ -192,19 +191,37 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      transition: border-color 0.2s, background 0.2s;
     }
+    #sidebar.dragover {
+      border: 2px dashed #82a760;
+      background: rgba(249, 251, 248, 0.98);
+    }
+
     .sidebar-header {
       padding: 10px 16px;
       background: #f1f5ee;
       border-bottom: 1px solid #e2e8e0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .sidebar-title-container {
+      display: flex;
+      flex-direction: column;
+    }
+    .sidebar-title {
       font-size: 0.75rem;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.1em;
       color: #5a6b4d;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+    }
+    .sidebar-subtitle {
+      font-size: 0.6rem;
+      color: #777;
+      margin-top: 2px;
+      font-style: italic;
     }
     .add-more-btn {
       background: #82a760;
@@ -220,6 +237,7 @@
       align-items: center;
       justify-content: center;
       transition: background 0.2s;
+      flex-shrink: 0;
     }
     .add-more-btn:hover { background: #6b8258; }
 
@@ -414,7 +432,6 @@
 
   <!-- Skjerm 2: 360-visning -->
   <div id="panorama-wrapper">
-    <!-- Overlay når fil dragges over viseren -->
     <div id="viewer-drop-overlay">
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -426,10 +443,13 @@
 
     <button class="btn close-btn" onclick="resetViewer()">Lukk bilde</button>
 
-    <!-- Sidevindu for bildeliste -->
-    <div id="sidebar">
+    <!-- Sidevindu for bildeliste med drag & drop støtte og veiledningstext -->
+    <div id="sidebar" id="sidebarContainer">
       <div class="sidebar-header">
-        <span>Opplastede bilder</span>
+        <div class="sidebar-title-container">
+          <span class="sidebar-title">Opplastede bilder</span>
+          <span class="sidebar-subtitle">Drag and drop eller trykk +</span>
+        </div>
         <button class="add-more-btn" title="Legg til flere bilder" onclick="document.getElementById('addMoreInput').click()">+</button>
       </div>
       <ul class="file-list" id="fileList"></ul>
@@ -463,6 +483,7 @@
     const dropZone = document.getElementById('dropZone');
     const panoramaWrapper = document.getElementById('panorama-wrapper');
     const viewerDropOverlay = document.getElementById('viewer-drop-overlay');
+    const sidebar = document.getElementById('sidebar');
     
     let viewer = null;
     let map = null;
@@ -486,7 +507,20 @@
       if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
     });
 
-    // --- Drag & Drop for Skjerm 2 (Globalt over viseren) ---
+    // --- Drag & Drop for Sidepanelet og globalt i visningen ---
+    sidebar.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      sidebar.classList.add('dragover');
+    });
+    sidebar.addEventListener('dragleave', () => {
+      sidebar.classList.remove('dragover');
+    });
+    sidebar.addEventListener('drop', (e) => {
+      e.preventDefault();
+      sidebar.classList.remove('dragover');
+      if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+    });
+
     window.addEventListener('dragover', (e) => {
       if (panoramaWrapper.style.display === 'block') {
         e.preventDefault();
@@ -529,7 +563,6 @@
           imgDir: metadata.imgDir || 0
         });
 
-        // Kort kunstig forsinkelse for å gi jevn og pen animasjon
         await new Promise(res => setTimeout(res, 80));
       }
 
@@ -565,7 +598,6 @@
       document.getElementById('progressStatusText').textContent = `${current} av ${total}: ${filename}`;
       document.getElementById('progressBarFill').style.width = `${percent}%`;
 
-      // Oppdater sirkelen (dashoffset fra 176 til 0)
       const circumference = 176;
       const offset = circumference - (percent / 100) * circumference;
       document.getElementById('progressCircle').style.strokeDashoffset = offset;
