@@ -149,10 +149,10 @@
       backdrop-filter: blur(4px);
     }
 
-    /* Sidepanel for Bildeliste - Flyttet nederst til venstre over kartet */
+    /* Sidepanel for Bildeliste */
     #sidebar {
       position: absolute;
-      bottom: 316px; /* Plassert over kartet (280px + 24px + 12px margin) */
+      bottom: 316px;
       left: 24px;
       width: 280px;
       max-height: calc(100vh - 420px);
@@ -166,7 +166,7 @@
       overflow: hidden;
     }
     .sidebar-header {
-      padding: 12px 16px;
+      padding: 10px 16px;
       background: #f1f5ee;
       border-bottom: 1px solid #e2e8e0;
       font-size: 0.75rem;
@@ -174,7 +174,29 @@
       text-transform: uppercase;
       letter-spacing: 0.1em;
       color: #5a6b4d;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
+    .add-more-btn {
+      background: #82a760;
+      color: white;
+      border: none;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s;
+    }
+    .add-more-btn:hover {
+      background: #6b8258;
+    }
+
     .file-list {
       list-style: none;
       overflow-y: auto;
@@ -182,14 +204,14 @@
       padding: 0;
     }
     .file-item {
-      padding: 10px 16px;
+      padding: 8px 16px;
       font-size: 0.85rem;
       color: #333;
       border-bottom: 1px solid #eee;
       cursor: pointer;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
       transition: background 0.15s;
     }
     .file-item:hover {
@@ -199,6 +221,32 @@
       background: #82a760;
       color: #ffffff;
       font-weight: 500;
+    }
+    .file-name {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex-grow: 1;
+      margin-right: 8px;
+    }
+    .delete-btn {
+      background: none;
+      border: none;
+      color: #999;
+      cursor: pointer;
+      font-size: 1.1rem;
+      padding: 0 4px;
+      line-height: 1;
+      transition: color 0.15s;
+    }
+    .file-item:hover .delete-btn {
+      color: #d9534f;
+    }
+    .file-item.active .delete-btn {
+      color: rgba(255, 255, 255, 0.8);
+    }
+    .file-item.active .delete-btn:hover {
+      color: #ffcccc;
     }
 
     /* Kartvisning */
@@ -227,7 +275,6 @@
       transform-origin: 30px 30px;
     }
 
-    /* Passiv kartnål for ikke-aktive bilder */
     .passive-marker {
       width: 16px;
       height: 16px;
@@ -275,9 +322,15 @@
 
     <!-- Sidevindu for bildeliste -->
     <div id="sidebar">
-      <div class="sidebar-header">Opplastede bilder</div>
+      <div class="sidebar-header">
+        <span>Opplastede bilder</span>
+        <button class="add-more-btn" title="Legg til flere bilder" onclick="document.getElementById('addMoreInput').click()">+</button>
+      </div>
       <ul class="file-list" id="fileList"></ul>
     </div>
+
+    <!-- Skjult filvelger for å legge til flere bilder mens man er i visningen -->
+    <input type="file" id="addMoreInput" accept="image/jpeg, image/png" multiple style="display: none;" onchange="handleFiles(this.files)" />
 
     <div id="panorama"></div>
     <div id="map"></div>
@@ -330,9 +383,16 @@
       renderSidebar();
       initMap();
       
-      if (imageStore.length > 0) {
+      // Velg første bilde automatisk hvis ingen er valgt fra før
+      if (imageStore.length > 0 && !activeImageId) {
         selectImage(imageStore[0].id);
+      } else {
+        updateMapMarkers();
       }
+
+      // Nullstill filinputene slik at man kan laste opp samme fil på nytt om ønskelig
+      document.getElementById('fileInput').value = '';
+      document.getElementById('addMoreInput').value = '';
     }
 
     function extractExif(file) {
@@ -369,8 +429,20 @@
       imageStore.forEach(img => {
         const li = document.createElement('li');
         li.className = `file-item ${img.id === activeImageId ? 'active' : ''}`;
-        li.textContent = img.name;
         li.onclick = () => selectImage(img.id);
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'file-name';
+        nameSpan.textContent = img.name;
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'delete-btn';
+        delBtn.innerHTML = '&times;';
+        delBtn.title = 'Fjern bilde';
+        delBtn.onclick = (e) => removeImage(e, img.id);
+
+        li.appendChild(nameSpan);
+        li.appendChild(delBtn);
         listContainer.appendChild(li);
       });
     }
@@ -383,6 +455,40 @@
       renderSidebar();
       initViewer(imgData.url);
       updateMapMarkers();
+    }
+
+    function removeImage(event, id) {
+      event.stopPropagation(); // Unngå at klikket utløser selectImage på listeelementet
+
+      const index = imageStore.findIndex(img => img.id === id);
+      if (index === -1) return;
+
+      // Rydd opp objekt-URLen
+      URL.revokeObjectURL(imageStore[index].url);
+
+      // Fjern markøren fra kartet
+      if (mapMarkers[id]) {
+        map.removeLayer(mapMarkers[id]);
+        delete mapMarkers[id];
+      }
+
+      // Fjern fra array
+      imageStore.splice(index, 1);
+
+      // Hvis det ikke er flere bilder igjen, gå tilbake til startskjermen
+      if (imageStore.length === 0) {
+        resetViewer();
+        return;
+      }
+
+      // Hvis vi slettet det aktive bildet, velg et nytt (f.eks. det neste eller forrige)
+      if (activeImageId === id) {
+        const nextIndex = Math.min(index, imageStore.length - 1);
+        selectImage(imageStore[nextIndex].id);
+      } else {
+        renderSidebar();
+        updateMapMarkers();
+      }
     }
 
     function initViewer(url) {
@@ -495,6 +601,7 @@
       document.getElementById('map').style.display = 'none';
       document.getElementById('upload-screen').style.display = 'flex';
       document.getElementById('fileInput').value = '';
+      document.getElementById('addMoreInput').value = '';
     }
   </script>
 </body>
