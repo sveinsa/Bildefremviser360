@@ -149,13 +149,13 @@
       backdrop-filter: blur(4px);
     }
 
-    /* Sidepanel for Bildeliste */
+    /* Sidepanel for Bildeliste - Flyttet nederst til venstre over kartet */
     #sidebar {
       position: absolute;
-      top: 24px;
+      bottom: 316px; /* Plassert over kartet (280px + 24px + 12px margin) */
       left: 24px;
-      width: 260px;
-      max-height: calc(100% - 340px);
+      width: 280px;
+      max-height: calc(100vh - 420px);
       background: rgba(255, 255, 255, 0.95);
       backdrop-filter: blur(8px);
       border-radius: 8px;
@@ -264,7 +264,6 @@
         </div>
         <h2>Dra og slipp et eller flere 360-bilder her</h2>
         <button class="btn" style="pointer-events: none;">Velg filer fra disk</button>
-        <!-- multiple tillater opplasting av flere filer -->
         <input type="file" id="fileInput" accept="image/jpeg, image/png" multiple style="display: none;" onchange="handleFiles(this.files)" />
       </div>
     </div>
@@ -290,11 +289,10 @@
     let map = null;
     let syncRAF = null;
     
-    let imageStore = []; // Array av { id, name, url, lat, lng, imgDir }
+    let imageStore = [];
     let activeImageId = null;
-    let mapMarkers = {}; // Kartmarkører nøklet på bilde-id
+    let mapMarkers = {};
 
-    // --- Drag & Drop Håndtering ---
     dropZone.addEventListener('dragover', (e) => { 
       e.preventDefault(); 
       dropZone.classList.add('dragover');
@@ -308,7 +306,6 @@
       if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
     });
 
-    // --- Behandle flere filer ---
     async function handleFiles(files) {
       const validFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
       if (!validFiles.length) return;
@@ -333,13 +330,11 @@
       renderSidebar();
       initMap();
       
-      // Åpne første bilde som standard
       if (imageStore.length > 0) {
         selectImage(imageStore[0].id);
       }
     }
 
-    // --- Les EXIF data asynchronously ---
     function extractExif(file) {
       return new Promise((resolve) => {
         EXIF.getData(file, function() {
@@ -367,7 +362,6 @@
       return parseFloat(val);
     }
 
-    // --- Bygg sideliste ---
     function renderSidebar() {
       const listContainer = document.getElementById('fileList');
       listContainer.innerHTML = '';
@@ -381,7 +375,6 @@
       });
     }
 
-    // --- Velg og vis et bilde ---
     function selectImage(id) {
       activeImageId = id;
       const imgData = imageStore.find(item => item.id === id);
@@ -392,7 +385,6 @@
       updateMapMarkers();
     }
 
-    // --- Pannellum 360 Viewer ---
     function initViewer(url) {
       if (viewer) viewer.destroy();
       viewer = pannellum.viewer('panorama', {
@@ -408,7 +400,6 @@
       syncLoop();
     }
 
-    // --- Opprett/Init Kart ---
     function initMap() {
       document.getElementById('map').style.display = 'block';
 
@@ -426,11 +417,9 @@
       updateMapMarkers();
     }
 
-    // --- Oppdater Markører på Kartet ---
     function updateMapMarkers() {
       if (!map) return;
 
-      // Fjern eksisterende markører
       Object.values(mapMarkers).forEach(m => map.removeLayer(m));
       mapMarkers = {};
 
@@ -444,7 +433,6 @@
 
         let icon;
         if (isActive) {
-          // Aktiv kompassnål med animated retningskjegle
           const iconHtml = `
             <div id="compass-marker" style="width: 60px; height: 60px; transform-origin: center;">
               <svg width="60" height="60" viewBox="0 0 60 60" style="overflow: visible;">
@@ -460,7 +448,6 @@
             </div>`;
           icon = L.divIcon({ html: iconHtml, className: '', iconSize: [60, 60], iconAnchor: [30, 30] });
         } else {
-          // Passiv kartnål for andre bilder
           icon = L.divIcon({
             html: `<div class="passive-marker"></div>`,
             className: '',
@@ -474,7 +461,6 @@
         mapMarkers[img.id] = m;
       });
 
-      // Sentrer kartet rundt det aktive bildet eller alle punkter
       const activeImg = imageStore.find(img => img.id === activeImageId);
       if (activeImg && activeImg.lat !== null) {
         map.setView([activeImg.lat, activeImg.lng], 15);
@@ -483,7 +469,6 @@
       }
     }
 
-    // --- Synkroniser Kompassrotering ---
     function syncLoop() {
       const compassMarker = document.getElementById('compass-marker');
       const activeImg = imageStore.find(img => img.id === activeImageId);
@@ -496,13 +481,11 @@
       syncRAF = requestAnimationFrame(syncLoop);
     }
 
-    // --- Tilbakestill Alt ---
     function resetViewer() {
       if (viewer) { viewer.destroy(); viewer = null; }
       if (map) { map.remove(); map = null; }
       cancelAnimationFrame(syncRAF);
 
-      // Rydd opp opprettede Blob URL-er
       imageStore.forEach(img => URL.revokeObjectURL(img.url));
       imageStore = [];
       activeImageId = null;
